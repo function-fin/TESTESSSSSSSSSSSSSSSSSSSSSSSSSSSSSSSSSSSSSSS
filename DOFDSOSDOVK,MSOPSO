@@ -174,7 +174,7 @@ Instance.new("UICorner", MainPanel).CornerRadius = UDim.new(0, 10)
 MakeDraggable(MainPanel)
 
 -- ==========================================================
--- NOTIFICAÇÃO (DESIGN IDÊNTICO À IMAGEM)
+-- NOTIFICAÇÃO (DESIGN IDÊNTICO À IMAGEM + BORDA BRANCA + ARCADE)
 -- ==========================================================
 local NotificationFrame = Instance.new("Frame")
 NotificationFrame.Name = "NotificationFrame"
@@ -186,12 +186,13 @@ NotificationFrame.BorderSizePixel = 0
 NotificationFrame.Visible = false
 NotificationFrame.ZIndex = 150
 NotificationFrame.Parent = ScreenGui
-Instance.new("UICorner", NotificationFrame).CornerRadius = UDim.new(0, 28) -- Bordas bem arredondadas (Pill shape)
+Instance.new("UICorner", NotificationFrame).CornerRadius = UDim.new(0, 28)
 
+-- BORDA BRANCA
 local NotifStroke = Instance.new("UIStroke", NotificationFrame)
-NotifStroke.Color = Color3.fromRGB(60, 60, 60)
-NotifStroke.Thickness = 1
-NotifStroke.Transparency = 0.5
+NotifStroke.Color = Color3.fromRGB(255, 255, 255)
+NotifStroke.Thickness = 1.5
+NotifStroke.Transparency = 0
 
 -- Avatar
 local NotifAvatar = Instance.new("ImageLabel")
@@ -213,34 +214,34 @@ NotifDivider.BorderSizePixel = 0
 NotifDivider.ZIndex = 151
 NotifDivider.Parent = NotificationFrame
 
--- Nome do Jogador
+-- Nome do Jogador (ARCADE)
 local NotifName = Instance.new("TextLabel")
 NotifName.Size = UDim2.new(1, -130, 0, 20)
 NotifName.Position = UDim2.new(0, 70, 0, 10)
 NotifName.BackgroundTransparency = 1
 NotifName.TextColor3 = Color3.fromRGB(255, 255, 255)
-NotifName.Font = Enum.Font.GothamBold
+NotifName.Font = Enum.Font.Arcade
 NotifName.TextSize = 14
 NotifName.TextXAlignment = Enum.TextXAlignment.Left
 NotifName.TextTruncate = Enum.TextTruncate.AtEnd
 NotifName.ZIndex = 151
 NotifName.Parent = NotificationFrame
 
--- Mensagem
+-- Mensagem (ARCADE)
 local NotifText = Instance.new("TextLabel")
 NotifText.Name = "NotifText"
 NotifText.Size = UDim2.new(1, -130, 0, 18)
 NotifText.Position = UDim2.new(0, 70, 0, 30)
 NotifText.BackgroundTransparency = 1
 NotifText.TextColor3 = Color3.fromRGB(180, 180, 180)
-NotifText.Font = Enum.Font.Gotham
+NotifText.Font = Enum.Font.Arcade
 NotifText.TextSize = 13
 NotifText.TextXAlignment = Enum.TextXAlignment.Left
 NotifText.TextTruncate = Enum.TextTruncate.AtEnd
 NotifText.ZIndex = 151
 NotifText.Parent = NotificationFrame
 
--- Botão Fechar (X)
+-- Botão Fechar (X) (ARCADE)
 local NotifCloseBtn = Instance.new("TextButton")
 NotifCloseBtn.Name = "CloseBtn"
 NotifCloseBtn.Size = UDim2.new(0, 30, 0, 30)
@@ -248,7 +249,7 @@ NotifCloseBtn.Position = UDim2.new(1, -40, 0.5, -15)
 NotifCloseBtn.BackgroundTransparency = 1
 NotifCloseBtn.Text = "×"
 NotifCloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-NotifCloseBtn.Font = Enum.Font.GothamBold
+NotifCloseBtn.Font = Enum.Font.Arcade
 NotifCloseBtn.TextSize = 24
 NotifCloseBtn.ZIndex = 152
 NotifCloseBtn.Parent = NotificationFrame
@@ -320,9 +321,8 @@ MessagesArea.Size = UDim2.new(1, -24, 1, -58)
 MessagesArea.Position = UDim2.new(0, 12, 0, 6)
 MessagesArea.BackgroundTransparency = 1
 MessagesArea.BorderSizePixel = 0
-MessagesArea.ScrollBarThickness = 4
-MessagesArea.ScrollBarImageColor3 = COLORS.White
-MessagesArea.ScrollBarImageTransparency = 0.4
+MessagesArea.ScrollBarThickness = 0            -- REMOVIDO (sem barra visual)
+MessagesArea.ScrollBarImageTransparency = 1     -- REMOVIDO (barra invisível)
 MessagesArea.CanvasSize = UDim2.new(0, 0, 0, 0)
 MessagesArea.ClipsDescendants = true
 MessagesArea.ScrollingDirection = Enum.ScrollingDirection.Y
@@ -834,7 +834,6 @@ UserInputService.InputEnded:Connect(function(input)
             if mousePos.X >= btnPos.X and mousePos.X <= btnPos.X + btnSize.X and
                mousePos.Y >= btnPos.Y and mousePos.Y <= btnPos.Y + btnSize.Y then
                 MainPanel.Visible = not MainPanel.Visible
-                -- Se o chat for aberto, esconde a notificação imediatamente
                 if MainPanel.Visible then
                     HideNotification()
                 end
