@@ -1,570 +1,850 @@
-local HttpService = game:GetService("HttpService")
+-- ==========================================================
+-- CHAT SYLLAS UPD - SCRIPT COMPLETO (AJUSTES FINAIS)
+-- ==========================================================
 local Players = game:GetService("Players")
-local MarketPlaceService = game:GetService("MarketplaceService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
+local ChatService = game:GetService("Chat")
+local RunService = game:GetService("RunService")
+
 local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- ============================================================
--- CONFIGURAÇÃO DE PERMISSÃO (CHAT HIDDEN SPWN)
--- ============================================================
-local AUTHORIZED_USER_ID = 9126511628
+local WS_URL = "wss://free.blr2.piesocket.com/v3/1?api_key=nJwrvMLQ39lJLpcxH88UbwiV08uXKrqSV7zvC1Z4&notify_self=1"
+local CURRENT_SERVER_ID = (game.JobId ~= "" and game.JobId) or "STUDIO_SERVER"
+local SOUND_ID = "rbxassetid://1293433423"
 
-local function isAuthorized()
-    return LocalPlayer and LocalPlayer.UserId == AUTHORIZED_USER_ID
+if PlayerGui:FindFirstChild("PrivateChatUI") then
+    PlayerGui.PrivateChatUI:Destroy()
 end
 
--- Interface de aviso (PrivateFunctionAlertUI) com prioridade máxima
-local function showPrivateAlert()
-    local CoreGui = game:GetService("CoreGui")
-    local parent = (pcall(function() return CoreGui.Name end) and CoreGui) or LocalPlayer:WaitForChild("PlayerGui")
+local COLORS = {
+    PanelBlack = Color3.fromRGB(0, 0, 0),
+    CardDark = Color3.fromRGB(16, 16, 16),
+    BlackInput = Color3.fromRGB(0, 0, 0),
+    White = Color3.fromRGB(255, 255, 255),
+    SubText = Color3.fromRGB(170, 170, 170),
+    BorderDim = Color3.fromRGB(115, 115, 115),
+    ToggleOffBg = Color3.fromRGB(58, 58, 58),
+    ToggleOnBg = Color3.fromRGB(220, 220, 220),
+    ToggleKnobOff = Color3.fromRGB(255, 255, 255),
+    ToggleKnobOn = Color3.fromRGB(20, 20, 20),
+    PrivatePink = Color3.fromRGB(255, 100, 200)
+}
 
-    if parent:FindFirstChild("PrivateFunctionAlertUI") then
-        parent.PrivateFunctionAlertUI:Destroy()
+local ICONS = {
+    Config = "rbxassetid://122647049137802",
+    SunHeader = "rbxassetid://77667780640343",
+    PowerOff = "rbxassetid://129423512956533",
+    Bell = "rbxassetid://106054450773402",
+    CopyText = "rbxassetid://89696314837335",
+    Freeze = "rbxassetid://121256149182197",
+    ClosePV = "rbxassetid://94498250014385"
+}
+
+local ChatSettings = {
+    Notifications = true,
+    CopyText = false,
+    FreezeChat = false
+}
+
+local mutedPlayers = {}
+local messagesByUser = {}
+local currentPrivateTarget = nil
+local lastMessageTime = 0
+local COOLDOWN_TIME = 5
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "PrivateChatUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.DisplayOrder = 999999
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.Parent = PlayerGui
+
+local NotificationSound = Instance.new("Sound")
+NotificationSound.SoundId = SOUND_ID
+NotificationSound.Volume = 1
+NotificationSound.Parent = ScreenGui
+
+local function EscapeRichText(text)
+    if not text then return "" end
+    text = tostring(text)
+    text = text:gsub("&", "&amp;")
+    text = text:gsub("<", "&lt;")
+    text = text:gsub(">", "&gt;")
+    text = text:gsub('"', "&quot;")
+    text = text:gsub("'", "&#39;")
+    return text
+end
+
+local function CleanInvisibleChars(str)
+    return str:gsub("[%z\1-\9\11\12\14-\31]", "")
+end
+
+local recentMessages = {}
+local DEDUP_WINDOW = 3
+
+local function IsDuplicate(username, msg)
+    local sig = tostring(username) .. "|" .. tostring(msg)
+    local now = os.clock()
+    for k, t in pairs(recentMessages) do
+        if now - t > DEDUP_WINDOW then recentMessages[k] = nil end
     end
-
-    local SCALE = 0.94
-    local function s(px) return math.round(px * SCALE) end
-
-    local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "PrivateFunctionAlertUI"
-    ScreenGui.ResetOnSpawn = false
-    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    ScreenGui.DisplayOrder = 999          -- prioridade sobre o menu principal
-    ScreenGui.Parent = parent
-
-    local MainFrame = Instance.new("Frame")
-    MainFrame.Name = "MainFrame"
-    MainFrame.Size = UDim2.new(0, s(410), 0, s(238))
-    MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-    MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-    MainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    MainFrame.BorderSizePixel = 0
-    MainFrame.Active = true
-    MainFrame.Parent = ScreenGui
-
-    local MainCorner = Instance.new("UICorner")
-    MainCorner.CornerRadius = UDim.new(0, s(3))
-    MainCorner.Parent = MainFrame
-
-    local MainStroke = Instance.new("UIStroke")
-    MainStroke.Color = Color3.fromRGB(255, 255, 255)
-    MainStroke.Thickness = math.max(1.2, 2 * SCALE)
-    MainStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    MainStroke.Parent = MainFrame
-
-    local LockIcon = Instance.new("ImageLabel")
-    LockIcon.Name = "LockIcon"
-    LockIcon.Size = UDim2.new(0, s(48), 0, s(48))
-    LockIcon.Position = UDim2.new(0.5, 0, 0, s(34))
-    LockIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-    LockIcon.BackgroundTransparency = 1
-    LockIcon.Image = "rbxassetid://86067014963187"
-    LockIcon.ImageColor3 = Color3.fromRGB(255, 255, 255)
-    LockIcon.ScaleType = Enum.ScaleType.Fit
-    LockIcon.Parent = MainFrame
-
-    local LeftLine = Instance.new("Frame")
-    LeftLine.Name = "LeftLine"
-    LeftLine.Size = UDim2.new(0, s(154), 0, math.max(1.5, 2 * SCALE))
-    LeftLine.Position = UDim2.new(0, s(18), 0, s(48))
-    LeftLine.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    LeftLine.BorderSizePixel = 0
-    LeftLine.Parent = MainFrame
-
-    local RightLine = Instance.new("Frame")
-    RightLine.Name = "RightLine"
-    RightLine.Size = UDim2.new(0, s(154), 0, math.max(1.5, 2 * SCALE))
-    RightLine.Position = UDim2.new(1, -s(172), 0, s(48))
-    RightLine.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    RightLine.BorderSizePixel = 0
-    RightLine.Parent = MainFrame
-
-    local MessageLabel = Instance.new("TextLabel")
-    MessageLabel.Name = "MessageLabel"
-    MessageLabel.Size = UDim2.new(1, -s(24), 0, s(68))
-    MessageLabel.Position = UDim2.new(0.5, 0, 0, s(106))
-    MessageLabel.AnchorPoint = Vector2.new(0.5, 0.5)
-    MessageLabel.BackgroundTransparency = 1
-    MessageLabel.Text = "Essa função é privada\nUsuário comuna não possuem acesso"
-    MessageLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    MessageLabel.Font = Enum.Font.Arcade
-    MessageLabel.TextSize = s(23)
-    MessageLabel.LineHeight = 1.15
-    MessageLabel.TextWrapped = true
-    MessageLabel.Parent = MainFrame
-
-    local CloseButton = Instance.new("TextButton")
-    CloseButton.Name = "CloseButton"
-    CloseButton.Size = UDim2.new(0, s(236), 0, s(54))
-    CloseButton.Position = UDim2.new(0.5, 0, 1, -s(44))
-    CloseButton.AnchorPoint = Vector2.new(0.5, 0.5)
-    CloseButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    CloseButton.Text = "FECHAR"
-    CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    CloseButton.Font = Enum.Font.Arcade
-    CloseButton.TextSize = s(25)
-    CloseButton.AutoButtonColor = false
-    CloseButton.Parent = MainFrame
-
-    local ButtonCorner = Instance.new("UICorner")
-    ButtonCorner.CornerRadius = UDim.new(0, s(12))
-    ButtonCorner.Parent = CloseButton
-
-    local ButtonStroke = Instance.new("UIStroke")
-    ButtonStroke.Color = Color3.fromRGB(255, 255, 255)
-    ButtonStroke.Thickness = math.max(1.5, 2.2 * SCALE)
-    ButtonStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    ButtonStroke.Parent = CloseButton
-
-    -- Arraste (mouse e touch)
-    local dragging, dragInput, dragStart, startPos = false, nil, nil, nil
-    local UIS = game:GetService("UserInputService")
-    local function updatePosition(input)
-        local delta = input.Position - dragStart
-        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    if recentMessages[sig] and (now - recentMessages[sig]) <= DEDUP_WINDOW then
+        return true
     end
-    MainFrame.InputBegan:Connect(function(input)
+    recentMessages[sig] = now
+    return false
+end
+
+local function MakeDraggable(guiObject, dragHandle)
+    dragHandle = dragHandle or guiObject
+    local dragging = false
+    local dragInput, dragStart, startPos
+    local hasMoved = false
+
+    dragHandle.InputBegan:Connect(function(input)
+        if ChatSettings.FreezeChat then return end
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true; dragStart = input.Position; startPos = MainFrame.Position
+            dragging = true
+            hasMoved = false
+            dragStart = input.Position
+            startPos = guiObject.Position
             input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
             end)
         end
     end)
-    MainFrame.InputChanged:Connect(function(input)
+
+    dragHandle.InputChanged:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
             dragInput = input
         end
     end)
-    UIS.InputChanged:Connect(function(input)
-        if dragging and input == dragInput then updatePosition(input) end
-    end)
 
-    CloseButton.MouseButton1Click:Connect(function()
-        ScreenGui:Destroy()
-    end)
-end
--- ============================================================
-
-local WebhookURL = "https://discord.com/api/webhooks/1539277119895380008/alBU5YhZjmV99l6hgAjqn1x4XUGi2LktevgpCtmsedldyGuB_KVB43LXxYsfV9xfuMHb"
-
-local function GetExecutor()
-    return (identifyexecutor and identifyexecutor()) 
-        or (getexecutorname and getexecutorname()) 
-        or "Desconhecido"
-end
-
-local placeName = "Desconhecido"
-pcall(function()
-    placeName = MarketPlaceService:GetProductInfo(game.PlaceId).Name
-end)
-
-local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
-
-local function EnviarLogDiscord()
-    if not httpRequest or WebhookURL == "" then return end
-    local payloadData = {
-        ["username"] = "SPWN CLIENT",
-        ["embeds"] = {{
-            ["title"] = "SPWN CLIENT Executed",
-            ["description"] = "SPWN CLIENT Menu has been executed",
-            ["color"] = 16777215,
-            ["fields"] = {
-                { ["name"] = "Player", ["value"] = "```" .. tostring(LocalPlayer.Name) .. "```", ["inline"] = false },
-                { ["name"] = "User ID", ["value"] = "```" .. tostring(LocalPlayer.UserId) .. "```", ["inline"] = false },
-                { ["name"] = "Account Age", ["value"] = "```" .. tostring(LocalPlayer.AccountAge) .. " days```", ["inline"] = false },
-                { ["name"] = "Executor", ["value"] = "```" .. tostring(GetExecutor()) .. "```", ["inline"] = false },
-                { ["name"] = "Game", ["value"] = "```" .. tostring(placeName) .. "```", ["inline"] = false },
-                { ["name"] = "Place ID", ["value"] = "```" .. tostring(game.PlaceId) .. "```", ["inline"] = false }
-            },
-            ["footer"] = { ["text"] = "SPWN Logs || System by: CHROLLO" }
-        }}
-    }
-    local success, payload = pcall(function() return HttpService:JSONEncode(payloadData) end)
-    if not success then return end
-    task.spawn(function()
-        pcall(function()
-            httpRequest({
-                Url = WebhookURL, Method = "POST",
-                Headers = { ["Content-Type"] = "application/json" },
-                Body = payload
-            })
-        end)
-    end)
-end
-
-EnviarLogDiscord()
-
-local TweenService, CoreGui, UIS = game:GetService("TweenService"), game:GetService("CoreGui"), game:GetService("UserInputService")
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
-
-local function Create(className, parent, props, corner, stroke)
-    local obj = Instance.new(className)
-    for k, v in pairs(props or {}) do obj[k] = v end
-    if corner then Instance.new("UICorner", obj).CornerRadius = UDim.new(0, corner) end
-    if stroke then
-        local str = Instance.new("UIStroke", obj)
-        for k, v in pairs(stroke) do str[k] = v end
-    end
-    if parent then obj.Parent = parent end
-    return obj
-end
-
-local targetParent = (pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui")) or PlayerGui
-
-local ScreenGui = Create("ScreenGui", targetParent, {
-    Name = "BrookHaven_V16_Final", 
-    ResetOnSpawn = false, 
-    IgnoreGuiInset = true,
-    DisplayOrder = 1,
-    ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-})
-
-local UiScale = Instance.new("UIScale", ScreenGui)
-local function UpdateUIScale()
-    UiScale.Scale = UIS.TouchEnabled and 1.0 or 1.9
-end
-UIS.GetPropertyChangedSignal(UIS, "TouchEnabled"):Connect(UpdateUIScale)
-UpdateUIScale()
-
-local ClickSound = Create("Sound", ScreenGui, {SoundId = "rbxassetid://118415301510285", Volume = 1})
-local function PlayClickSound()
-    if ClickSound.IsPlaying then ClickSound:Stop() end
-    ClickSound:Play()
-end
-
-local DarkOverlay = Create("Frame", ScreenGui, {
-    Name = "DarkOverlay", AnchorPoint = Vector2.new(0.5, 0.5),
-    Position = UDim2.new(0.5, 0, 0.5, 0), Size = UDim2.new(3, 0, 3, 0),
-    BackgroundColor3 = Color3.fromRGB(0, 0, 0), BackgroundTransparency = 0.25,
-    BorderSizePixel = 0, Visible = true, ZIndex = 1
-})
-
-local OpenBtn = Create("ImageButton", ScreenGui, {
-    Name = "OpenBtn", Position = UDim2.new(0, 50, 0, 55),
-    AnchorPoint = Vector2.new(0.5, 0), Size = UDim2.new(0, 80, 0, 80),
-    BackgroundTransparency = 1, Image = "rbxassetid://131615335465809",
-    ImageTransparency = 0, Visible = true, ZIndex = 500
-})
-
-local MainFrame = Create("Frame", ScreenGui, {Name = "MainFrame", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0), Size = UDim2.new(0, 420, 0, 310), BackgroundColor3 = Color3.fromRGB(0,0,0), BorderSizePixel = 0, Active = true, Draggable = true, Visible = true, ZIndex = 10}, 8, {Color = Color3.fromRGB(255, 255, 255), Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border})
-
-local dragToggle, dragStart, startPos
-OpenBtn.InputBegan:Connect(function(input)
-    if MainFrame.Visible then return end
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragToggle, dragStart, startPos = true, input.Position, OpenBtn.Position
-        if OpenBtn.AnchorPoint ~= Vector2.new(0, 0) then
-            OpenBtn.AnchorPoint = Vector2.new(0, 0)
-            OpenBtn.Position = UDim2.new(0, OpenBtn.AbsolutePosition.X, 0, OpenBtn.AbsolutePosition.Y)
+    UserInputService.InputChanged:Connect(function(input)
+        if ChatSettings.FreezeChat then dragging = false; return end
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            if delta.Magnitude > 4 then hasMoved = true end
+            guiObject.Position = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
+            )
         end
+    end)
+
+    return function() return hasMoved end
+end
+
+local ToggleButton = Instance.new("TextButton")
+ToggleButton.Name = "ChatToggleButton"
+ToggleButton.Size = UDim2.new(0, 44, 0, 130)
+ToggleButton.Position = UDim2.new(0, 14, 0.5, -65)
+ToggleButton.BackgroundColor3 = COLORS.PanelBlack
+ToggleButton.BackgroundTransparency = 0.45
+ToggleButton.BorderSizePixel = 0
+ToggleButton.AutoButtonColor = false
+ToggleButton.Text = "C\nH\nA\nT"
+ToggleButton.TextColor3 = COLORS.White
+ToggleButton.TextSize = 16
+ToggleButton.Font = Enum.Font.GothamBlack
+ToggleButton.LineHeight = 1.15
+ToggleButton.Parent = ScreenGui
+
+Instance.new("UICorner", ToggleButton).CornerRadius = UDim.new(0, 8)
+MakeDraggable(ToggleButton)
+
+local MainPanel = Instance.new("Frame")
+MainPanel.Name = "ChatMainPanel"
+MainPanel.Size = UDim2.new(0, 414, 0, 283)
+MainPanel.Position = UDim2.new(0.5, -207, 0.5, -141)
+MainPanel.BackgroundColor3 = COLORS.PanelBlack
+MainPanel.BackgroundTransparency = 0.45
+MainPanel.BorderSizePixel = 0
+MainPanel.Visible = true
+MainPanel.Parent = ScreenGui
+Instance.new("UICorner", MainPanel).CornerRadius = UDim.new(0, 10)
+MakeDraggable(MainPanel)
+
+-- ==========================================================
+-- NOTIFICAÇÃO (DESIGN IDÊNTICO À IMAGEM)
+-- ==========================================================
+local NotificationFrame = Instance.new("Frame")
+NotificationFrame.Name = "NotificationFrame"
+NotificationFrame.Size = UDim2.new(0, 380, 0, 56) 
+NotificationFrame.Position = UDim2.new(0, 14, 1, -76)
+NotificationFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
+NotificationFrame.BackgroundTransparency = 0.05
+NotificationFrame.BorderSizePixel = 0
+NotificationFrame.Visible = false
+NotificationFrame.ZIndex = 150
+NotificationFrame.Parent = ScreenGui
+Instance.new("UICorner", NotificationFrame).CornerRadius = UDim.new(0, 28) -- Bordas bem arredondadas (Pill shape)
+
+local NotifStroke = Instance.new("UIStroke", NotificationFrame)
+NotifStroke.Color = Color3.fromRGB(60, 60, 60)
+NotifStroke.Thickness = 1
+NotifStroke.Transparency = 0.5
+
+-- Avatar
+local NotifAvatar = Instance.new("ImageLabel")
+NotifAvatar.Name = "AvatarImage"
+NotifAvatar.Size = UDim2.new(0, 40, 0, 40)
+NotifAvatar.Position = UDim2.new(0, 10, 0.5, -20)
+NotifAvatar.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+NotifAvatar.BackgroundTransparency = 1
+NotifAvatar.ZIndex = 151
+NotifAvatar.Parent = NotificationFrame
+Instance.new("UICorner", NotifAvatar).CornerRadius = UDim.new(0, 10)
+
+-- Divisor Vertical
+local NotifDivider = Instance.new("Frame")
+NotifDivider.Size = UDim2.new(0, 2, 0.7, 0)
+NotifDivider.Position = UDim2.new(0, 60, 0.15, 0)
+NotifDivider.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+NotifDivider.BorderSizePixel = 0
+NotifDivider.ZIndex = 151
+NotifDivider.Parent = NotificationFrame
+
+-- Nome do Jogador
+local NotifName = Instance.new("TextLabel")
+NotifName.Size = UDim2.new(1, -130, 0, 20)
+NotifName.Position = UDim2.new(0, 70, 0, 10)
+NotifName.BackgroundTransparency = 1
+NotifName.TextColor3 = Color3.fromRGB(255, 255, 255)
+NotifName.Font = Enum.Font.GothamBold
+NotifName.TextSize = 14
+NotifName.TextXAlignment = Enum.TextXAlignment.Left
+NotifName.TextTruncate = Enum.TextTruncate.AtEnd
+NotifName.ZIndex = 151
+NotifName.Parent = NotificationFrame
+
+-- Mensagem
+local NotifText = Instance.new("TextLabel")
+NotifText.Name = "NotifText"
+NotifText.Size = UDim2.new(1, -130, 0, 18)
+NotifText.Position = UDim2.new(0, 70, 0, 30)
+NotifText.BackgroundTransparency = 1
+NotifText.TextColor3 = Color3.fromRGB(180, 180, 180)
+NotifText.Font = Enum.Font.Gotham
+NotifText.TextSize = 13
+NotifText.TextXAlignment = Enum.TextXAlignment.Left
+NotifText.TextTruncate = Enum.TextTruncate.AtEnd
+NotifText.ZIndex = 151
+NotifText.Parent = NotificationFrame
+
+-- Botão Fechar (X)
+local NotifCloseBtn = Instance.new("TextButton")
+NotifCloseBtn.Name = "CloseBtn"
+NotifCloseBtn.Size = UDim2.new(0, 30, 0, 30)
+NotifCloseBtn.Position = UDim2.new(1, -40, 0.5, -15)
+NotifCloseBtn.BackgroundTransparency = 1
+NotifCloseBtn.Text = "×"
+NotifCloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+NotifCloseBtn.Font = Enum.Font.GothamBold
+NotifCloseBtn.TextSize = 24
+NotifCloseBtn.ZIndex = 152
+NotifCloseBtn.Parent = NotificationFrame
+
+local currentNotifTask = nil
+
+local function GetThumbnail(userId)
+    if not userId or userId == 0 then return "rbxassetid://0" end
+    local ok, url = pcall(function()
+        return Players:GetUserThumbnailAsync(userId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
+    end)
+    return ok and url or "rbxassetid://0"
+end
+
+local function HideNotification()
+    if currentNotifTask then
+        task.cancel(currentNotifTask)
+        currentNotifTask = nil
     end
-end)
-UIS.InputChanged:Connect(function(input)
-    if MainFrame.Visible then dragToggle = false; return end
-    if dragToggle and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        local delta = input.Position - dragStart
-        OpenBtn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    NotificationFrame.Visible = false
+end
+
+local function ShowNotification(senderName, message, userId)
+    if not ChatSettings.Notifications then return end
+
+    if currentNotifTask then
+        task.cancel(currentNotifTask)
+        currentNotifTask = nil
     end
-end)
-UIS.InputEnded:Connect(function(input) 
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then 
-        dragToggle = false 
-    end 
-end)
 
-local HeaderBar = Create("Frame", MainFrame, {Size = UDim2.new(1, 0, 0, 65), BackgroundTransparency = 1, ZIndex = 11})
-local Title = Create("TextLabel", HeaderBar, {Size = UDim2.new(1, 0, 0, 50), Position = UDim2.new(0, 0, 0, 5), BackgroundTransparency = 1, Text = "Sobre o ᓵ⚍ʖリ╎ℸ ", TextColor3 = Color3.fromRGB(255,255,255), TextSize = 28, Font = Enum.Font.Arcade, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Center, TextYAlignment = Enum.TextYAlignment.Center, ZIndex = 11})
-Create("Frame", HeaderBar, {Name = "WhiteSeparator", Size = UDim2.new(1, -20, 0, 7), Position = UDim2.new(0.5, 0, 0, 58), AnchorPoint = Vector2.new(0.5, 0), BackgroundColor3 = Color3.fromRGB(255,255,255), BorderSizePixel = 0, ZIndex = 11})
+    NotificationSound:Play()
 
-local LeftBtn = Create("TextButton", HeaderBar, {Size = UDim2.new(0, 38, 0, 38), Position = UDim2.new(0, 10, 0, 10), BackgroundColor3 = Color3.fromRGB(255,255,255), Text = "<", TextColor3 = Color3.fromRGB(0,0,0), TextSize = 28, Font = Enum.Font.SourceSansBold, Visible = false, ZIndex = 12}, 6)
-local RightBtn = Create("TextButton", HeaderBar, {Size = UDim2.new(0, 38, 0, 38), Position = UDim2.new(1, -48, 0, 10), BackgroundColor3 = Color3.fromRGB(255,255,255), Text = ">", TextColor3 = Color3.fromRGB(0,0,0), TextSize = 28, Font = Enum.Font.SourceSansBold, ZIndex = 12}, 6)
+    NotifName.Text = EscapeRichText(senderName)
+    NotifText.Text = EscapeRichText(message)
+    NotifAvatar.Image = GetThumbnail(userId)
 
-local PageAbout = Create("ScrollingFrame", MainFrame, {
-    Size = UDim2.new(1, -20, 1, -135), Position = UDim2.new(0, 10, 0, 68),
-    BackgroundTransparency = 1, CanvasSize = UDim2.new(0, 0, 0, 780),
-    ScrollBarThickness = 3, ScrollBarImageColor3 = Color3.fromRGB(255, 255, 255),
-    ScrollingDirection = Enum.ScrollingDirection.Y, Visible = true, ZIndex = 11
-})
+    NotificationFrame.Visible = true
+    NotificationFrame.BackgroundTransparency = 0.05
+    NotifName.TextTransparency = 0
+    NotifText.TextTransparency = 0
+    NotifAvatar.ImageTransparency = 0
 
-local WelcomeCard = Create("Frame", PageAbout, {
-    Size = UDim2.new(1, -10, 0, 58), Position = UDim2.new(0, 2, 0, 4),
-    BackgroundColor3 = Color3.fromRGB(0, 0, 0), ZIndex = 11
-}, 6, {Color = Color3.fromRGB(255, 255, 255), Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border})
-
-local IconWelcome = Create("ImageLabel", WelcomeCard, {
-    Size = UDim2.new(0, 42, 0, 42), Position = UDim2.new(0, 8, 0.5, -21),
-    BackgroundTransparency = 1, Image = "rbxassetid://114065081553101", ZIndex = 12
-})
-
-local WelcomeLabel = Create("TextLabel", WelcomeCard, {
-    Size = UDim2.new(1, -60, 0, 22), Position = UDim2.new(0, 58, 0, 8),
-    BackgroundTransparency = 1,
-    Text = "BEM-VINDO | <font color=\"#FFFFFF\">" .. LocalPlayer.DisplayName .. "</font>",
-    TextColor3 = Color3.fromRGB(255, 255, 255), TextSize = 14, Font = Enum.Font.Arcade,
-    RichText = true, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 12
-})
-
-local SubTitleLabel = Create("TextLabel", WelcomeCard, {
-    Size = UDim2.new(1, -60, 0, 18), Position = UDim2.new(0, 58, 0, 30),
-    BackgroundTransparency = 1, Text = "SPWAN Community project under development",
-    TextColor3 = Color3.fromRGB(200, 200, 200), TextSize = 11, Font = Enum.Font.Arcade,
-    TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 12
-})
-
-local MonitorCard = Create("Frame", PageAbout, {
-    Size = UDim2.new(1, -10, 0, 95), Position = UDim2.new(0, 2, 0, 68),
-    BackgroundColor3 = Color3.fromRGB(0, 0, 0), ZIndex = 11
-}, 6, {Color = Color3.fromRGB(255, 255, 255), Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border})
-
-local MonitorTitle = Create("TextLabel", MonitorCard, {
-    Size = UDim2.new(1, -16, 0, 18), Position = UDim2.new(0, 8, 0, 6),
-    BackgroundTransparency = 1, Text = "[ MONITORAMENTO DO SERVIDOR ]",
-    TextColor3 = Color3.fromRGB(255, 255, 255), TextSize = 12, Font = Enum.Font.Arcade,
-    TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 12
-})
-
-local PlayersCountLabel = Create("TextLabel", MonitorCard, {
-    Size = UDim2.new(1, -16, 0, 18), Position = UDim2.new(0, 8, 0, 26),
-    BackgroundTransparency = 1,
-    Text = "Jogadores no Servidor: " .. #Players:GetPlayers() .. "/" .. Players.MaxPlayers,
-    TextColor3 = Color3.fromRGB(255, 255, 255), TextSize = 12, Font = Enum.Font.Arcade,
-    TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 12
-})
-
-local function UpdatePlayerCount()
-    PlayersCountLabel.Text = "Jogadores no Servidor: " .. #Players:GetPlayers() .. "/" .. Players.MaxPlayers
-end
-Players.PlayerAdded:Connect(UpdatePlayerCount)
-Players.PlayerRemoving:Connect(UpdatePlayerCount)
-
-Create("Frame", MonitorCard, {Size = UDim2.new(1, -16, 0, 1), Position = UDim2.new(0, 8, 0, 50), BackgroundColor3 = Color3.fromRGB(150, 150, 150), BorderSizePixel = 0, ZIndex = 12})
-
-local TipIcon = Create("TextLabel", MonitorCard, {
-    Size = UDim2.new(0, 16, 0, 16), Position = UDim2.new(0, 8, 0, 62),
-    BackgroundTransparency = 1, Text = "ⓘ", TextColor3 = Color3.fromRGB(255, 255, 255),
-    TextSize = 14, Font = Enum.Font.SourceSansBold, ZIndex = 12
-})
-
-local TipLabel = Create("TextLabel", MonitorCard, {
-    Size = UDim2.new(1, -30, 0, 30), Position = UDim2.new(0, 26, 0, 56),
-    BackgroundTransparency = 1,
-    Text = "Dica : Algumas Funções São desligadas Completamente Dando um Duplo Click Rápido.",
-    TextColor3 = Color3.fromRGB(255, 255, 255), TextSize = 10, Font = Enum.Font.Arcade,
-    TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 12
-})
-
-Create("TextLabel", PageAbout, {
-    Size = UDim2.new(1, -10, 0, 450), Position = UDim2.new(0, 2, 0, 172),
-    BackgroundTransparency = 1,
-    Text = '// ACCESS LOG] O Project SPWN CLIENT consiste na criação de um script com funções universais, desenvolvido para se expandir por diversos jogos da plataforma Roblox. O objective do projeto é explorar, desenvolver e reunir todo tipo de sistema, ferramenta e ideia que possa ser aplicada em diferentes experiências, sempre trazendo novas funcionalidades e buscando inovação. Além de criar sistemas para diversos jogos, o Project SPAWN CLIENT também tem como objetivo construir uma comunidade de desenvolvedores interessados em compartilhar conhecimento, ensinar o desenvolvimento de projetos e trocar experiências sobre Vibe Coding. Se você deseja fazer parte do Project SPWN CLIENT, conhecer mais sobre a iniciativa ou contribuir com ideias, desenvolver sistemas, criar designs ou acompanhar sua evolução, entre no servidor do Discord do Project ( Signature CHROLLO)',
-    TextColor3 = Color3.fromRGB(255, 255, 255), TextSize = 13, Font = Enum.Font.Arcade,
-    TextWrapped = true, RichText = true, TextXAlignment = Enum.TextXAlignment.Left,
-    TextYAlignment = Enum.TextYAlignment.Top, ZIndex = 11
-})
-
-local SymbolAboutImage = Create("ImageLabel", PageAbout, {
-    Name = "SymbolAboutImage", Size = UDim2.new(0, 120, 0, 120),
-    Position = UDim2.new(0.5, 0, 0, 630), AnchorPoint = Vector2.new(0.5, 0),
-    BackgroundTransparency = 1, Image = "rbxassetid://85337967115080",
-    ImageColor3 = Color3.fromRGB(255, 255, 255), ZIndex = 11
-})
-Create("UIAspectRatioConstraint", SymbolAboutImage, {AspectRatio = 1})
-
-local PageScripts = Create("ScrollingFrame", MainFrame, {Size = UDim2.new(1, -15, 1, -145), Position = UDim2.new(0, 8, 0, 75), BackgroundTransparency = 1, Visible = false, CanvasSize = UDim2.new(0, 0, 0, 770), ScrollBarThickness = 3, ScrollBarImageColor3 = Color3.fromRGB(255, 255, 255), ZIndex = 11})
-Create("UIGridLayout", PageScripts, {CellSize = UDim2.new(0, 96, 0, 52), CellPadding = UDim2.new(0, 5, 0, 6), HorizontalAlignment = Enum.HorizontalAlignment.Center})
-
-local PageTools = Create("ScrollingFrame", MainFrame, {Size = UDim2.new(1, -16, 1, -145), Position = UDim2.new(0, 8, 0, 75), BackgroundTransparency = 1, Visible = false, CanvasSize = UDim2.new(0, 0, 0, 250), ScrollBarThickness = 3, ScrollBarImageColor3 = Color3.fromRGB(255, 255, 255), ScrollingEnabled = true, ZIndex = 11})
-Create("UIGridLayout", PageTools, {CellSize = UDim2.new(0, 64, 0, 72), CellPadding = UDim2.new(0, 4, 0, 8), HorizontalAlignment = Enum.HorizontalAlignment.Center})
-
-local WhiteBarSeparator = Create("Frame", MainFrame, {Name = "WhiteBarSeparator", Size = UDim2.new(1, -20, 0, 4), Position = UDim2.new(0.5, 0, 1, -78), AnchorPoint = Vector2.new(0.5, 0), BackgroundColor3 = Color3.fromRGB(255,255,255), BorderSizePixel = 0, Visible = false, ZIndex = 11})
-
-local FooterBar = Create("Frame", MainFrame, {Size = UDim2.new(1, 0, 0, 65), Position = UDim2.new(0, 0, 1, -65), BackgroundColor3 = Color3.fromRGB(22,22,22), BorderSizePixel = 0, ZIndex = 11})
-
-local CloseBtn = Create("TextButton", FooterBar, {Name = "CloseBtn", Size = UDim2.new(0, 160, 0, 42), Position = UDim2.new(0.5, -80, 0.5, -21), BackgroundColor3 = Color3.fromRGB(0,0,0), Text = "FECHAR UI", TextColor3 = Color3.fromRGB(255,255,255), TextSize = 22, Font = Enum.Font.Arcade, ZIndex = 12}, 6, {Color = Color3.fromRGB(255,255,255), Thickness = 1.5, ApplyStrokeMode = Enum.ApplyStrokeMode.Border})
-
-local function ToggleMenu(state)
-    MainFrame.Visible = state
-    DarkOverlay.Visible = state
-    if state then dragToggle = false end
+    currentNotifTask = task.delay(2, function()
+        TweenService:Create(NotificationFrame, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
+        TweenService:Create(NotifName, TweenInfo.new(0.3), {TextTransparency = 1}):Play()
+        TweenService:Create(NotifText, TweenInfo.new(0.3), {TextTransparency = 1}):Play()
+        TweenService:Create(NotifAvatar, TweenInfo.new(0.3), {ImageTransparency = 1}):Play()
+        task.wait(0.3)
+        NotificationFrame.Visible = false
+        currentNotifTask = nil
+    end)
 end
 
-CloseBtn.MouseButton1Click:Connect(function()
-    PlayClickSound()
-    ToggleMenu(false)
+NotifCloseBtn.MouseButton1Click:Connect(HideNotification)
+
+local ConfigButton = Instance.new("ImageButton")
+ConfigButton.Name = "ConfigButton"
+ConfigButton.Size = UDim2.new(0, 32, 0, 32)
+ConfigButton.Position = UDim2.new(1, -40, 0, 8)
+ConfigButton.BackgroundTransparency = 1
+ConfigButton.Image = ICONS.Config
+ConfigButton.ScaleType = Enum.ScaleType.Fit
+ConfigButton.ZIndex = 15
+ConfigButton.Parent = MainPanel
+
+local MessagesArea = Instance.new("ScrollingFrame")
+MessagesArea.Name = "MessagesArea"
+MessagesArea.Size = UDim2.new(1, -24, 1, -58)
+MessagesArea.Position = UDim2.new(0, 12, 0, 6)
+MessagesArea.BackgroundTransparency = 1
+MessagesArea.BorderSizePixel = 0
+MessagesArea.ScrollBarThickness = 4
+MessagesArea.ScrollBarImageColor3 = COLORS.White
+MessagesArea.ScrollBarImageTransparency = 0.4
+MessagesArea.CanvasSize = UDim2.new(0, 0, 0, 0)
+MessagesArea.ClipsDescendants = true
+MessagesArea.ScrollingDirection = Enum.ScrollingDirection.Y
+MessagesArea.Parent = MainPanel
+
+local MessagesLayout = Instance.new("UIListLayout")
+MessagesLayout.SortOrder = Enum.SortOrder.LayoutOrder
+MessagesLayout.Padding = UDim.new(0, 2)
+MessagesLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+MessagesLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+MessagesLayout.Parent = MessagesArea
+
+MessagesLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    MessagesArea.CanvasSize = UDim2.new(0, 0, 0, MessagesLayout.AbsoluteContentSize.Y)
 end)
 
-local function CreateSymbol(pos)
-    return Create("ImageLabel", FooterBar, {Size = UDim2.new(0, 45, 0, 45), Position = pos, BackgroundTransparency = 1, Image = "rbxassetid://130275641191868", ImageColor3 = Color3.fromRGB(255,255,255), ZIndex = 12})
+local MessagesPadding = Instance.new("UIPadding")
+MessagesPadding.PaddingLeft = UDim.new(0, 2)
+MessagesPadding.PaddingRight = UDim.new(0, 48)
+MessagesPadding.PaddingTop = UDim.new(0, 0)
+MessagesPadding.PaddingBottom = UDim.new(0, 0)
+MessagesPadding.Parent = MessagesArea
+
+local InputContainer = Instance.new("Frame")
+InputContainer.Name = "InputContainer"
+InputContainer.Size = UDim2.new(1, -24, 0, 38)
+InputContainer.Position = UDim2.new(0, 12, 1, -48)
+InputContainer.BackgroundColor3 = COLORS.BlackInput
+InputContainer.BackgroundTransparency = 0.05
+InputContainer.BorderSizePixel = 0
+InputContainer.Parent = MainPanel
+Instance.new("UICorner", InputContainer).CornerRadius = UDim.new(0, 8)
+
+local ChatInput = Instance.new("TextBox")
+ChatInput.Name = "ChatInput"
+ChatInput.Size = UDim2.new(1, -40, 1, 0)
+ChatInput.Position = UDim2.new(0, 12, 0, 0)
+ChatInput.BackgroundTransparency = 1
+ChatInput.Text = ""
+ChatInput.PlaceholderText = "Clique aqui para digitar..."
+ChatInput.PlaceholderColor3 = COLORS.SubText
+ChatInput.TextColor3 = COLORS.White
+ChatInput.Font = Enum.Font.GothamMedium
+ChatInput.TextSize = 14
+ChatInput.TextXAlignment = Enum.TextXAlignment.Left
+ChatInput.ClearTextOnFocus = false
+ChatInput.Parent = InputContainer
+
+local CancelPrivateBtn = Instance.new("ImageButton")
+CancelPrivateBtn.Name = "CancelPrivateBtn"
+CancelPrivateBtn.Size = UDim2.new(0, 20, 0, 20)
+CancelPrivateBtn.Position = UDim2.new(1, -30, 0.5, -10)
+CancelPrivateBtn.BackgroundTransparency = 1
+CancelPrivateBtn.Image = ICONS.ClosePV
+CancelPrivateBtn.ImageColor3 = COLORS.SubText
+CancelPrivateBtn.Visible = false
+CancelPrivateBtn.ZIndex = 10
+CancelPrivateBtn.Parent = InputContainer
+
+local function ShowBubble(username, message)
+    if mutedPlayers[username] then return end
+    local plr = Players:FindFirstChild(username)
+    if not plr then return end
+    local char = plr.Character
+    if not char then return end
+    local head = char:FindFirstChild("Head")
+    if not head then return end
+    pcall(function()
+        ChatService:Chat(head, message, Enum.ChatColor.White)
+    end)
 end
-CreateSymbol(UDim2.new(0, 15, 0.5, -22)); CreateSymbol(UDim2.new(1, -60, 0.5, -22))
 
-local DiscordBtn = Create("ImageButton", FooterBar, {Name = "DiscordBtn", Size = UDim2.new(0, 45, 0, 45), Position = UDim2.new(0, 65, 0.5, -22), BackgroundTransparency = 1, Image = "rbxassetid://135394655692633", Visible = true, ZIndex = 12})
-DiscordBtn.MouseButton1Click:Connect(function() PlayClickSound(); loadstring(game:HttpGet("https://raw.githubusercontent.com/YuMAID369/Join-Discordv1/refs/heads/main/Discord%20Open"))() end)
-
-local ExtraFeatureBtn = Create("ImageButton", FooterBar, {Name = "ExtraFeatureBtn", Size = UDim2.new(0, 42, 0, 42), Position = UDim2.new(0.5, 92, 0.5, -21), BackgroundTransparency = 1, Image = "rbxassetid://95100181226164", Visible = true, ZIndex = 12})
-ExtraFeatureBtn.MouseButton1Click:Connect(function() 
-    PlayClickSound() 
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/function-fin/ANTI-SLATKEEPER-HARASSMENT/refs/heads/main/PROJECT%20ANTI"))() 
-end)
-
-local NewFeatureBtn = Create("ImageButton", FooterBar, {Name = "NewFeatureBtn", Size = UDim2.new(0, 42, 0, 42), Position = UDim2.new(0.5, -140, 0.5, -21), BackgroundTransparency = 1, Image = "rbxassetid://80947825662336", Visible = false, ZIndex = 12})
-NewFeatureBtn.MouseButton1Click:Connect(function() 
-    PlayClickSound() 
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/function-fin/ARMAZ-M-E-ORDEM-/refs/heads/main/Beta%20Ordem"))() 
-end)
-
-local BrooklynNewFeatureBtn = Create("ImageButton", FooterBar, {Name = "BrooklynNewFeatureBtn", Size = UDim2.new(0, 42, 0, 42), Position = UDim2.new(1, -110, 0.5, -21), BackgroundTransparency = 1, Image = "rbxassetid://107818122785915", Visible = false, ZIndex = 12})
-BrooklynNewFeatureBtn.MouseButton1Click:Connect(function()
-    PlayClickSound()
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/function-fin/INSPECIONAR-PLAYERS/refs/heads/main/administra%C3%A7%C3%A3o%20PLY"))()
-end)
-
-local AdapterBtn = Create("ImageButton", FooterBar, {Name = "AdapterBtn", Size = UDim2.new(0, 45, 0, 45), Position = UDim2.new(0, 65, 0.5, -22), BackgroundTransparency = 1, Image = "rbxassetid://73146839145612", Visible = false, ZIndex = 12})
-AdapterBtn.MouseButton1Click:Connect(function() PlayClickSound(); loadstring(game:HttpGet("https://raw.githubusercontent.com/function-fin/ADAPTADOR-1.0-V1-SPAWN/refs/heads/main/Modified%20Tools%20Adapter"))() end)
-
-local GuideBtn = Create("ImageButton", FooterBar, {Name = "GuideBtn", Size = UDim2.new(0, 45, 0, 45), Position = UDim2.new(1, -110, 0.5, -22), BackgroundTransparency = 1, Image = "rbxassetid://82557612348731", Visible = false, ZIndex = 12})
-GuideBtn.MouseButton1Click:Connect(function() PlayClickSound(); loadstring(game:HttpGet("https://raw.githubusercontent.com/function-fin/AVISO-IMPORTANTE-PAINEL-TOOL/refs/heads/main/TOOL%20AN%C3%9ANCIO%20GUIA"))() end)
-
-local currentPage = 1
-local function updateNavigation(page)
-    currentPage = page
-    PageAbout.Visible = (page == 1)
-    PageScripts.Visible = (page == 2)
-    PageTools.Visible = (page == 3)
-    WhiteBarSeparator.Visible = (page == 3)
-    DiscordBtn.Visible = (page == 1)
-    ExtraFeatureBtn.Visible = (page == 1)
-    NewFeatureBtn.Visible = (page == 2)
-    BrooklynNewFeatureBtn.Visible = (page == 2)
-    AdapterBtn.Visible = (page == 3)
-    GuideBtn.Visible = (page == 3)
-    local titleData = {
-        [1] = {text = "Sobre o ᓵ⚍ʖリ╎ℸ ", size = 28, uSize = UDim2.new(1, 0, 0, 50), pos = UDim2.new(0, 0, 0, 5), left = false, right = true},
-        [2] = {text = "BROOKHAVEN", size = 40, uSize = UDim2.new(1, 0, 0, 50), pos = UDim2.new(0, 0, 0, 5), left = true, right = true},
-        [3] = {text = "Painel Tool", size = 35, uSize = UDim2.new(1, -100, 0, 50), pos = UDim2.new(0, 50, 0, 5), left = true, right = false}
-    }
-    local conf = titleData[page]
-    Title.Text, Title.TextSize, Title.Size, Title.Position = conf.text, conf.size, conf.uSize, conf.pos
-    LeftBtn.Visible, RightBtn.Visible = conf.left, conf.right
+local function SetPrivateTarget(targetName)
+    currentPrivateTarget = targetName
+    if targetName then
+        ChatInput.PlaceholderText = "PRVT TO " .. targetName .. "..."
+        ChatInput.PlaceholderColor3 = COLORS.PrivatePink
+        CancelPrivateBtn.Visible = true
+    else
+        ChatInput.PlaceholderText = "Clique aqui para digitar..."
+        ChatInput.PlaceholderColor3 = COLORS.SubText
+        CancelPrivateBtn.Visible = false
+    end
 end
 
-RightBtn.MouseButton1Click:Connect(function() if currentPage < 3 then PlayClickSound(); updateNavigation(currentPage + 1) end end)
-LeftBtn.MouseButton1Click:Connect(function() if currentPage > 1 then PlayClickSound(); updateNavigation(currentPage - 1) end end)
+CancelPrivateBtn.MouseButton1Click:Connect(function()
+    SetPrivateTarget(nil)
+end)
 
-local ScriptData = {
-    ["CLOCK V2 Deep SPWN"] = "https://raw.githubusercontent.com/function-fin/01/refs/heads/main/01",
-    ["RSPY 0.0.0.1"] = "https://raw.githubusercontent.com/function-fin/RSPY-RECONSTRU-DO-E-ADAPTADO/refs/heads/main/SPAWN%20RSPY",
-    ["DEX OLD"] = "https://raw.githubusercontent.com/infyiff/backup/main/dex.lua",
-    ["Terminal Join Server"] = "https://raw.githubusercontent.com/YuMAID369/Terminal-Join-Server-SpwnCub-/refs/heads/main/SPWN%20Join",
-    ["Sound ALL Beta"] = "https://raw.githubusercontent.com/function-fin/Sound-ALL-Project/refs/heads/main/Sound%20ALL",
-    ["CLOCK CREATOR PROPs"] = "https://raw.githubusercontent.com/YuMAID369/CLOCK-Creator-Project-PROP-SPWN/refs/heads/main/CLOCK%20Creator%20Project%20PROP%20SPWN%20CLIENT%20V1",
-    ["DELETE PLAYER Anti NUKE"] = "https://raw.githubusercontent.com/YuMAID369/Anti-PLAYER-/refs/heads/main/REMOVE%20PLAYER",
-    ["Summoner Vehicles Panel"] = "https://raw.githubusercontent.com/YuMAID369/VEHICLE-KILL-PANEL-/refs/heads/main/Summoner%20Vehicles%20V1%20KILL",
-    ["HIDDEN LIBRARY SPWN"] = "https://raw.githubusercontent.com/YuMAID369/Bloco-de-Notas-SpawnCUB/refs/heads/main/Notebook%20Notes",
-    ["Cronômetro V1"] = "https://raw.githubusercontent.com/YuMAID369/Cron-metro-Spwn-v1/refs/heads/main/00%3A00%3A00",
-    ["ENTER ID#"] = "https://raw.githubusercontent.com/YuMAID369/ENTER-ID-/refs/heads/main/ENTER%20ID%23%20000",
-    ["CALCULATOR STUDIES"] = "https://raw.githubusercontent.com/function-fin/Roblox-Studs-Calculator-Beta/refs/heads/main/STUDS%20Calculecter0.0.0.0.1",
-    ["SPWAN Coordinates"] = "https://raw.githubusercontent.com/YuMAID369/Coordenadas-Ui-/refs/heads/main/Coordenadas%20SPWN%20V1",
-    ["Vehicle Speed Upgrade"] = "https://raw.githubusercontent.com/function-fin/Ve-culo-Upgrade-Turbo-/refs/heads/main/Vehicle%20S",
-    ["EMOTES DO SPAWN"] = "https://raw.githubusercontent.com/function-fin/Roblox-/refs/heads/main/TESTES",
-    ["CHINOOK ANNOY"] = "https://raw.githubusercontent.com/function-fin/PROJECT-CHINOOK/refs/heads/main/0.1",
-    ["SELECT MATTER TP"] = "https://raw.githubusercontent.com/YuMAID369/ToolSpwnTp/refs/heads/main/SPWNTPtool",
-    ["TIME STOP V1 BETA"] = "https://raw.githubusercontent.com/YuMAID369/TIME-STOP-V1-SPWN-/refs/heads/main/Stop%20time%20SpwnCub",
-    ["BUFF Humanoid Simple"] = "https://raw.githubusercontent.com/function-fin/Buff-Simple/refs/heads/main/SIMPLE%20BUFF%20UPDATE",
-    ["SCANNER PARTS AND MATTER"] = "https://raw.githubusercontent.com/function-fin/Scanner-MATTER-Server/refs/heads/main/Scanner%20MATTER%20Beta",
-    ["HUMANOID STATUS VIEW"] = "https://raw.githubusercontent.com/YuMAID369/Humanoid-Status-VIEW-/refs/heads/main/SPWNCUB",
-    ["INSPECIONAR TELA DESING V1"] = "https://raw.githubusercontent.com/function-fin/Desing-SIZE-ui-Project/refs/heads/main/SYLAS",
-    ["Documentation"] = "https://raw.githubusercontent.com/function-fin/Lore-confidential-document/refs/heads/main/Paperwork",
-    ["FLY GUI MARK"] = "https://raw.githubusercontent.com/YuMAID369/MARK-V1-FLY-GUI-/refs/heads/main/MARK%20FLY%20GUI%20V2",
-    ["BAN HOUSE"] = "https://raw.githubusercontent.com/YuMAID369/BAN-HOUSE-/refs/heads/main/BrookHaven",
-    ["INSPECIONAR AVATAR"] = "https://raw.githubusercontent.com/YuMAID369/INSPECT-AV2/refs/heads/main/idsAV2",
-    ["FREEZE EMOTE AND VELOCIDADE"] = "https://raw.githubusercontent.com/YuMAID369/FreezeEmote-/refs/heads/main/Universal%20Emote%20Lock",
-    ["EMOTES"] = "https://rawscripts.net/raw/Universal-Script-7yd7-I-Emote-Script-48024",
-    ["SHADERS"] = "https://raw.githubusercontent.com/YuMAID369/Shaders-V1/refs/heads/main/CUBNIT",
-    ["MANOPLA V1"] = "https://raw.githubusercontent.com/YuMAID369/MANOPLA-V2/refs/heads/main/HAND",
-    ["INFINITY YIELD"] = "https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source",
-    ["TP TOOL"] = "https://raw.githubusercontent.com/YuMAID369/TP-TOOL-v1/refs/heads/main/TP%20Tool",
-    ["TP POINT"] = "https://raw.githubusercontent.com/YuMAID369/Teletransporte-/refs/heads/main/SpawnCUB",
-    ["FREE CAM"] = "https://raw.githubusercontent.com/YuMAID369/SpawnCam/refs/heads/main/Universal%20Cam",
-    ["CHAT MICKEY"] = "https://rawscripts.net/raw/Brookhaven-RP-Mickey-Chat-85762",
-    ["Prop R15 Structure"] = "https://raw.githubusercontent.com/function-fin/ROBOT-R15/refs/heads/main/PROP%20ROBOT",
-    ["TELEKINESIS"] = "https://raw.githubusercontent.com/YuMAID369/TELEKINESIS-/refs/heads/main/Telekinesis%20Tool",
-    ["FLING BALL V1"] = "https://raw.githubusercontent.com/YuMAID369/Fling-Ball-Cubnit-V1/refs/heads/main/Kill%20Ball%20V1",
-    ["FLING AURA BALL"] = "https://raw.githubusercontent.com/function-fin/Pr0t0tip0-aura-BA-/refs/heads/main/Aura%20BA/Aura%20BALL%20x1v2",
-    ["CHAT HIDDEN SPWN "] = "https://raw.githubusercontent.com/YuMAID369/Chat-Privado/refs/heads/main/OpenChatBeta",
-    ["VIEW"] = "https://raw.githubusercontent.com/YuMAID369/View-SpawnCUB-/refs/heads/main/View%20Din%C3%A2mico%20Beta",
-    ["PHYSICS"] = "https://raw.githubusercontent.com/YuMAID369/Humanoid-physics-manipulation/refs/heads/main/Physics%20Alterer",
-    ["SKYBOX NUKE"] = "https://raw.githubusercontent.com/YuMAID369/SKYBOX-V1/refs/heads/main/SKYBOX-SPAWN",
-    ["SOUND BOX GUI"] = "https://raw.githubusercontent.com/YuMAID369/Id-Brook-haven-m-sica/refs/heads/main/SpwnSom",
-    ["TOOL FLING ALL SELECT"] = "https://raw.githubusercontent.com/YuMAID369/Atom-selector-/refs/heads/main/Target%20Kill",
-    ["SELECT MATTER V2"] = "https://raw.githubusercontent.com/YuMAID369/SELECT-MATTER/refs/heads/main/SPWN%20KILL%20V2%20SELECT",
-    ["STAND AND BANG"] = "https://raw.githubusercontent.com/function-fin/Project-Bang-Stand/refs/heads/main/Experiment%20Stand",
-    ["SELECT MATTER V3"] = "https://raw.githubusercontent.com/YuMAID369/SELECT-MATTER-V3-/refs/heads/main/FLING%20V3%20TOOL%20SPWN",
-    ["VIEW V2 VRP"] = "https://raw.githubusercontent.com/YuMAID369/UI-View-V2-VPR/refs/heads/main/V2View%20VPR",
-    ["Prop data collector"] = "https://raw.githubusercontent.com/function-fin/Prop-data-collector-/refs/heads/main/Analyze%20structured%20data",
-}
+local function AppendMessage(senderName, displayName, text, isMe, isPrivate)
+    if mutedPlayers[senderName] and not isMe then return end
 
--- ============================================================
--- Criação dos botões com trava de permissão no CHAT HIDDEN SPWN
--- ============================================================
-for name, link in pairs(ScriptData) do
-    local btn = Create("TextButton", PageScripts, {BackgroundColor3 = Color3.fromRGB(35,35,35), Text = name, TextColor3 = Color3.fromRGB(255,255,255), TextSize = 15, Font = Enum.Font.Arcade, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Center, TextYAlignment = Enum.TextYAlignment.Center, ZIndex = 12}, 4)
-    btn.MouseButton1Click:Connect(function()
-        PlayClickSound()
-        if name == "CHAT HIDDEN SPWN " then
-            if not isAuthorized() then
-                showPrivateAlert()   -- interface prioritária de bloqueio
-                return               -- aborta: script NÃO executa
+    local MsgLabel = Instance.new("TextLabel")
+    MsgLabel.Size = UDim2.new(1, 0, 0, 0)
+    MsgLabel.AutomaticSize = Enum.AutomaticSize.Y
+    MsgLabel.BackgroundTransparency = 1
+    MsgLabel.BorderSizePixel = 0
+    MsgLabel.RichText = true
+    MsgLabel.Font = Enum.Font.GothamMedium
+    MsgLabel.TextSize = 16
+    MsgLabel.TextWrapped = true
+    MsgLabel.TextXAlignment = Enum.TextXAlignment.Left
+    MsgLabel.TextYAlignment = Enum.TextYAlignment.Top
+    MsgLabel.TextTransparency = 0
+    MsgLabel.TextStrokeTransparency = 1
+    MsgLabel.Parent = MessagesArea
+
+    MsgLabel:GetPropertyChangedSignal("TextTransparency"):Connect(function()
+        if MsgLabel.TextTransparency > 0 then
+            MsgLabel.TextTransparency = 0
+        end
+    end)
+
+    task.spawn(function()
+        for i = 1, 5 do
+            task.wait(0.1)
+            if MsgLabel and MsgLabel.Parent then
+                MsgLabel.TextTransparency = 0
             end
         end
-        loadstring(game:HttpGet(link))()
+    end)
+
+    local safeName = EscapeRichText(displayName or senderName)
+    local safeMsg  = EscapeRichText(text)
+
+    local nameColor = isMe and "rgb(80,220,120)" or "rgb(50,160,255)"
+    local prefix = ""
+
+    if isPrivate then
+        if isMe then
+            prefix = string.format("<font color='rgb(255,100,200)'>[TO: %s]</font> ", safeName)
+        else
+            prefix = "<font color='rgb(255,100,200)'>[PV]</font> "
+        end
+    end
+
+    MsgLabel.Text = string.format(
+        "%s<font color='%s'>[%s]:</font> <font color='rgb(255,255,255)'>%s</font>",
+        prefix, nameColor, safeName, safeMsg
+    )
+
+    local ClickDetector = Instance.new("TextButton")
+    ClickDetector.Size = UDim2.new(1, 0, 1, 0)
+    ClickDetector.BackgroundTransparency = 1
+    ClickDetector.Text = ""
+    ClickDetector.ZIndex = 5
+    ClickDetector.Parent = MsgLabel
+
+    ClickDetector.MouseButton1Click:Connect(function()
+        if isMe and not isPrivate then return end
+        if ChatSettings.CopyText then
+            if setclipboard then setclipboard(text)
+            elseif toclipboard then toclipboard(text) end
+            MsgLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+            task.delay(0.2, function()
+                if MsgLabel and MsgLabel.Parent then
+                    MsgLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+                end
+            end)
+        else
+            if not isMe then
+                SetPrivateTarget(senderName)
+            end
+        end
+    end)
+
+    if not messagesByUser[senderName] then messagesByUser[senderName] = {} end
+    table.insert(messagesByUser[senderName], MsgLabel)
+
+    task.defer(function()
+        if MessagesArea and MessagesArea.Parent then
+            MessagesArea.CanvasPosition = Vector2.new(0, MessagesArea.AbsoluteCanvasSize.Y)
+        end
     end)
 end
 
-local ToolData = {
-    {id = "7314683914561", name = "Fling Ball\nTool", link = "https://raw.githubusercontent.com/YuMAID369/Fling-Ball-Cubnit-V1/refs/heads/main/Kill%20Ball%20V1"},
-    {id = "7314683914562", name = "TOOL\nTELEKINESIS", link = "https://raw.githubusercontent.com/YuMAID369/TELEKINESIS-/refs/heads/main/Telekinesis%20Tool"},
-    {id = "7314683914563", name = "TP TOOL", link = "https://raw.githubusercontent.com/YuMAID369/TP-TOOL-v1/refs/heads/main/TP%20Tool"},
-    {id = "7314683914564", name = "FLING\nAll SELECT V1", link = "https://raw.githubusercontent.com/YuMAID369/Atom-selector-/refs/heads/main/Target%20Kill"},
-    {id = "7314683914565", name = "FLING\nAll SELECT V2", link = "https://raw.githubusercontent.com/YuMAID369/SELECT-MATTER/refs/heads/main/SPWN%20KILL%20V2%20SELECT"},
-    {id = "7314683914566", name = "SELECT\nMATTER TP", link = "https://raw.githubusercontent.com/YuMAID369/ToolSpwnTp/refs/heads/main/SPWNTPtool"},
-    {id = "7314683914567", name = "SELECT\nMATTER V3", link = "https://raw.githubusercontent.com/YuMAID369/SELECT-MATTER-V3-/refs/heads/main/FLING%20V3%20TOOL%20SPWN"},
-    {id = "7314683914568", name = "FLING AURA\nBALL", link = "https://raw.githubusercontent.com/function-fin/Pr0t0tip0-aura-BA-/refs/heads/main/Aura%20BA/Aura%20BALL%20x1v2"}
-}
+local socket
+local running = true
 
-for _, data in ipairs(ToolData) do
-    local toolBtn = Create("TextButton", PageTools, {Name = "Tool_" .. data.id, BackgroundColor3 = Color3.fromRGB(45, 45, 45), Text = data.name, TextColor3 = Color3.fromRGB(255, 255, 255), TextSize = 14, Font = Enum.Font.LuckiestGuy, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Center, TextYAlignment = Enum.TextYAlignment.Center, ZIndex = 12}, 2)
-    if data.link ~= "" then
-        toolBtn.MouseButton1Click:Connect(function() PlayClickSound(); loadstring(game:HttpGet(data.link))() end)
+local function ConnectWS()
+    if not running then return end
+    local ok, res = pcall(function() return WebSocket.connect(WS_URL) end)
+
+    if ok and res then
+        socket = res
+        print("[PrivateChat] Conectado ao PieHost.")
+
+        socket.OnMessage:Connect(function(raw)
+            if not running then return end
+            local ok2, data = pcall(function() return HttpService:JSONDecode(raw) end)
+            if not (ok2 and data and data.message) then return end
+            if data.serverId ~= CURRENT_SERVER_ID then return end
+
+            local isMe = (data.username == LocalPlayer.Name)
+            local isTargetingMe = (data.target == LocalPlayer.Name)
+            local isPrivate = (data.target ~= nil and data.target ~= "")
+
+            if isPrivate and not isTargetingMe and not isMe then return end
+            if not isMe and IsDuplicate(data.username, data.message) then return end
+            if mutedPlayers[data.username] and not isMe then return end
+
+            if not isMe then
+                AppendMessage(data.username, data.nickname or data.username, data.message, false, isPrivate)
+                ShowBubble(data.username, data.message)
+
+                if not MainPanel.Visible and ChatSettings.Notifications then
+                    local plr = Players:FindFirstChild(data.username)
+                    local uid = plr and plr.UserId or 0
+                    if uid == 0 then
+                        pcall(function() uid = Players:GetUserIdFromNameAsync(data.username) end)
+                    end
+                    ShowNotification(data.nickname or data.username, data.message, uid)
+                end
+            end
+        end)
+
+        socket.OnClose:Connect(function()
+            if running then
+                warn("[PrivateChat] Desconectado. Reconectando...")
+                task.wait(5); ConnectWS()
+            end
+        end)
     else
-        toolBtn.AutoButtonColor = false
+        warn("[PrivateChat] Falha. Tentando novamente...")
+        task.wait(5); ConnectWS()
     end
 end
 
-local CloseConfirmFrame = Create("Frame", ScreenGui, {Name = "CloseConfirmFrame", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0), Size = UDim2.new(0, 340, 0, 185), BackgroundColor3 = Color3.fromRGB(0, 0, 0), BorderSizePixel = 0, Active = true, Draggable = true, Visible = false, ZIndex = 100}, nil, {Color = Color3.fromRGB(255, 255, 255), Thickness = 2, ApplyStrokeMode = Enum.ApplyStrokeMode.Border})
+local function SendMessage()
+    local content = ChatInput.Text
 
-Create("ImageLabel", CloseConfirmFrame, {Name = "BackgroundSymbol", Size = UDim2.new(0, 150, 0, 150), Position = UDim2.new(0.5, 0, 0.5, 0), AnchorPoint = Vector2.new(0.5, 0.5), BackgroundTransparency = 1, Image = "rbxassetid://130275641191868", ImageTransparency = 0.85, ZIndex = 101})
-Create("ImageLabel", CloseConfirmFrame, {Name = "GearIcon", Size = UDim2.new(0, 42, 0, 42), Position = UDim2.new(0, 12, 0, 10), BackgroundTransparency = 1, Image = "rbxassetid://122647049137802", ZIndex = 102})
-Create("TextLabel", CloseConfirmFrame, {Size = UDim2.new(0, 200, 0, 40), Position = UDim2.new(0, 58, 0, 10), BackgroundTransparency = 1, Text = "Encerrar Sessão", TextColor3 = Color3.fromRGB(255, 255, 255), TextSize = 22, Font = Enum.Font.Arcade, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 102})
+    if content:match("^%s*$") then return end
 
-local CloseXBtn = Create("ImageButton", CloseConfirmFrame, {Name = "CloseXBtn", Size = UDim2.new(0, 32, 0, 32), Position = UDim2.new(1, -42, 0, 12), BackgroundTransparency = 1, Image = "rbxassetid://98235327129327", ZIndex = 102})
-Create("TextLabel", CloseConfirmFrame, {Size = UDim2.new(1, -20, 0, 45), Position = UDim2.new(0, 10, 0, 58), BackgroundTransparency = 1, Text = "Tem certeza de que deseja fechar o script?\nAlgumas funções poderão ser interrompidas.", TextColor3 = Color3.fromRGB(255, 255, 255), TextSize = 13, Font = Enum.Font.Arcade, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 102})
+    content = CleanInvisibleChars(content)
+    if content:match("^%s*$") then return end
 
-local CancelBtn = Create("TextButton", CloseConfirmFrame, {Name = "CancelBtn", Size = UDim2.new(0, 120, 0, 35), Position = UDim2.new(0, 22, 1, -48), BackgroundColor3 = Color3.fromRGB(0, 0, 0), Text = "CANCELAR", TextColor3 = Color3.fromRGB(255, 255, 255), TextSize = 15, Font = Enum.Font.Arcade, ZIndex = 102}, 4, {Color = Color3.fromRGB(255, 255, 255), Thickness = 1.5, ApplyStrokeMode = Enum.ApplyStrokeMode.Border})
-local ExitScriptBtn = Create("TextButton", CloseConfirmFrame, {Name = "ExitScriptBtn", Size = UDim2.new(0, 130, 0, 35), Position = UDim2.new(1, -152, 1, -48), BackgroundColor3 = Color3.fromRGB(0, 0, 0), Text = "FECHAR SCRIPT", TextColor3 = Color3.fromRGB(255, 255, 255), TextSize = 15, Font = Enum.Font.Arcade, ZIndex = 102}, 4, {Color = Color3.fromRGB(255, 255, 255), Thickness = 1.5, ApplyStrokeMode = Enum.ApplyStrokeMode.Border})
-
-CloseXBtn.MouseButton1Click:Connect(function() PlayClickSound(); CloseConfirmFrame.Visible = false end)
-CancelBtn.MouseButton1Click:Connect(function() PlayClickSound(); CloseConfirmFrame.Visible = false end)
-ExitScriptBtn.MouseButton1Click:Connect(function() PlayClickSound(); ScreenGui:Destroy() end)
-
-local lastClick = 0
-OpenBtn.MouseButton1Click:Connect(function()
-    local currentTime = tick()
-    PlayClickSound()
-    if (currentTime - lastClick) < 0.35 then 
-        CloseConfirmFrame.Visible = true 
-    else 
-        ToggleMenu(not MainFrame.Visible)
+    if string.lower(content) == "/clear" then
+        for _, child in ipairs(MessagesArea:GetChildren()) do
+            if child:IsA("TextLabel") then
+                child:Destroy()
+            end
+        end
+        ChatInput.Text = ""
+        return
     end
-    lastClick = currentTime
+
+    local currentTime = os.clock()
+    if currentTime - lastMessageTime < COOLDOWN_TIME then
+        ChatInput.TextColor3 = Color3.fromRGB(255, 100, 100)
+        task.delay(0.3, function()
+            if ChatInput then ChatInput.TextColor3 = COLORS.White end
+        end)
+        return
+    end
+
+    if not socket then warn("[PrivateChat] Sem conexão."); return end
+
+    lastMessageTime = currentTime
+    ChatInput.Text = ""
+
+    local payload = {
+        username = LocalPlayer.Name,
+        nickname = LocalPlayer.DisplayName,
+        message = content,
+        serverId = CURRENT_SERVER_ID,
+        target = currentPrivateTarget
+    }
+    pcall(function() socket:Send(HttpService:JSONEncode(payload)) end)
+
+    AppendMessage(LocalPlayer.Name, LocalPlayer.DisplayName, content, true, currentPrivateTarget ~= nil)
+    ShowBubble(LocalPlayer.Name, content)
+end
+
+ChatInput.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        SendMessage()
+    end
 end)
+
+local ConfigPanel = Instance.new("Frame")
+ConfigPanel.Name = "ConfigPanel"
+ConfigPanel.Size = UDim2.new(1, -36, 1, -110)
+ConfigPanel.Position = UDim2.new(0, 18, 0, 46)
+ConfigPanel.BackgroundColor3 = COLORS.CardDark
+ConfigPanel.BackgroundTransparency = 0.12
+ConfigPanel.Visible = false
+ConfigPanel.ZIndex = 10
+ConfigPanel.Parent = MainPanel
+Instance.new("UICorner", ConfigPanel).CornerRadius = UDim.new(0, 10)
+
+local ConfigStroke = Instance.new("UIStroke", ConfigPanel)
+ConfigStroke.Color = COLORS.White
+ConfigStroke.Thickness = 1.2
+ConfigStroke.Transparency = 0.25
+ConfigStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+
+local HeaderFrame = Instance.new("Frame")
+HeaderFrame.Size = UDim2.new(1, 0, 0, 44)
+HeaderFrame.BackgroundTransparency = 1
+HeaderFrame.ZIndex = 11
+HeaderFrame.Parent = ConfigPanel
+
+local SunIcon = Instance.new("ImageLabel")
+SunIcon.Size = UDim2.new(0, 28, 0, 28)
+SunIcon.Position = UDim2.new(0, 16, 0.5, -14)
+SunIcon.BackgroundTransparency = 1
+SunIcon.Image = ICONS.SunHeader
+SunIcon.ScaleType = Enum.ScaleType.Fit
+SunIcon.ZIndex = 12
+SunIcon.Parent = HeaderFrame
+
+local HeaderTitle = Instance.new("TextLabel")
+HeaderTitle.Size = UDim2.new(1, -60, 1, 0)
+HeaderTitle.Position = UDim2.new(0, 56, 0, 0)
+HeaderTitle.BackgroundTransparency = 1
+HeaderTitle.Text = "PAINEL DO SCRIPT"
+HeaderTitle.TextColor3 = COLORS.White
+HeaderTitle.Font = Enum.Font.Arcade
+HeaderTitle.TextSize = 16
+HeaderTitle.TextXAlignment = Enum.TextXAlignment.Left
+HeaderTitle.ZIndex = 12
+HeaderTitle.Parent = HeaderFrame
+
+local HeaderDivider = Instance.new("Frame")
+HeaderDivider.Size = UDim2.new(1, -24, 0, 1)
+HeaderDivider.Position = UDim2.new(0, 12, 1, -1)
+HeaderDivider.BackgroundColor3 = COLORS.BorderDim
+HeaderDivider.BackgroundTransparency = 0.45
+HeaderDivider.BorderSizePixel = 0
+HeaderDivider.ZIndex = 12
+HeaderDivider.Parent = HeaderFrame
+
+local OptionsList = Instance.new("ScrollingFrame")
+OptionsList.Size = UDim2.new(1, -8, 1, -48)
+OptionsList.Position = UDim2.new(0, 4, 0, 46)
+OptionsList.BackgroundTransparency = 1
+OptionsList.BorderSizePixel = 0
+OptionsList.ScrollBarThickness = 3
+OptionsList.ScrollBarImageColor3 = COLORS.White
+OptionsList.ScrollBarImageTransparency = 0.4
+OptionsList.CanvasSize = UDim2.new(0, 0, 0, 0)
+OptionsList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+OptionsList.ZIndex = 11
+OptionsList.Parent = ConfigPanel
+
+local OptionsLayout = Instance.new("UIListLayout")
+OptionsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+OptionsLayout.Parent = OptionsList
+
+local function CreateOptionRow(order, iconId, titleText, descText, hasDivider)
+    local Row = Instance.new("Frame")
+    Row.LayoutOrder = order
+    Row.Size = UDim2.new(1, 0, 0, 54)
+    Row.BackgroundTransparency = 1
+    Row.ZIndex = 12
+    Row.Parent = OptionsList
+
+    local IconImg = Instance.new("ImageLabel")
+    IconImg.Size = UDim2.new(0, 26, 0, 26)
+    IconImg.Position = UDim2.new(0, 14, 0.5, -13)
+    IconImg.BackgroundTransparency = 1
+    IconImg.Image = iconId
+    IconImg.ScaleType = Enum.ScaleType.Fit
+    IconImg.ZIndex = 14
+    IconImg.Parent = Row
+
+    local TitleLabel = Instance.new("TextLabel")
+    TitleLabel.Size = UDim2.new(1, -185, 0, 18)
+    TitleLabel.Position = UDim2.new(0, 50, 0, 10)
+    TitleLabel.BackgroundTransparency = 1
+    TitleLabel.Text = titleText
+    TitleLabel.TextColor3 = COLORS.White
+    TitleLabel.Font = Enum.Font.GothamBold
+    TitleLabel.TextSize = 13
+    TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    TitleLabel.ZIndex = 13
+    TitleLabel.Parent = Row
+
+    local DescLabel = Instance.new("TextLabel")
+    DescLabel.Size = UDim2.new(1, -185, 0, 16)
+    DescLabel.Position = UDim2.new(0, 50, 0, 28)
+    DescLabel.BackgroundTransparency = 1
+    DescLabel.Text = descText
+    DescLabel.TextColor3 = COLORS.SubText
+    DescLabel.Font = Enum.Font.Gotham
+    DescLabel.TextSize = 10
+    DescLabel.TextXAlignment = Enum.TextXAlignment.Left
+    DescLabel.TextTruncate = Enum.TextTruncate.AtEnd
+    DescLabel.ZIndex = 13
+    DescLabel.Parent = Row
+
+    if hasDivider then
+        local Line = Instance.new("Frame")
+        Line.Size = UDim2.new(1, -24, 0, 1)
+        Line.Position = UDim2.new(0, 12, 1, -1)
+        Line.BackgroundColor3 = COLORS.BorderDim
+        Line.BackgroundTransparency = 0.55
+        Line.BorderSizePixel = 0
+        Line.ZIndex = 13
+        Line.Parent = Row
+    end
+    return Row
+end
+
+local function AddToggleControl(row, defaultState, callback)
+    local state = defaultState or false
+    local StatusLabel = Instance.new("TextLabel")
+    StatusLabel.Size = UDim2.new(0, 62, 0, 22)
+    StatusLabel.Position = UDim2.new(1, -72, 0.5, -11)
+    StatusLabel.BackgroundTransparency = 1
+    StatusLabel.Text = state and "Ativado" or "Desativado"
+    StatusLabel.TextColor3 = state and COLORS.White or COLORS.SubText
+    StatusLabel.Font = Enum.Font.Gotham
+    StatusLabel.TextSize = 10
+    StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+    StatusLabel.ZIndex = 13
+    StatusLabel.Parent = row
+
+    local SwitchBg = Instance.new("TextButton")
+    SwitchBg.Size = UDim2.new(0, 44, 0, 22)
+    SwitchBg.Position = UDim2.new(1, -122, 0.5, -11)
+    SwitchBg.BackgroundColor3 = state and COLORS.ToggleOnBg or COLORS.ToggleOffBg
+    SwitchBg.BorderSizePixel = 0
+    SwitchBg.AutoButtonColor = false
+    SwitchBg.Text = ""
+    SwitchBg.ZIndex = 13
+    SwitchBg.Parent = row
+    Instance.new("UICorner", SwitchBg).CornerRadius = UDim.new(1, 0)
+
+    local Knob = Instance.new("Frame")
+    Knob.Size = UDim2.new(0, 16, 0, 16)
+    Knob.Position = state and UDim2.new(1, -19, 0.5, -8) or UDim2.new(0, 3, 0.5, -8)
+    Knob.BackgroundColor3 = state and COLORS.ToggleKnobOn or COLORS.ToggleKnobOff
+    Knob.BorderSizePixel = 0
+    Knob.ZIndex = 14
+    Knob.Parent = SwitchBg
+    Instance.new("UICorner", Knob).CornerRadius = UDim.new(1, 0)
+
+    SwitchBg.MouseButton1Click:Connect(function()
+        state = not state
+        StatusLabel.Text = state and "Ativado" or "Desativado"
+        StatusLabel.TextColor3 = state and COLORS.White or COLORS.SubText
+        local tweenInfo = TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        TweenService:Create(SwitchBg, tweenInfo, {
+            BackgroundColor3 = state and COLORS.ToggleOnBg or COLORS.ToggleOffBg
+        }):Play()
+        TweenService:Create(Knob, tweenInfo, {
+            Position = state and UDim2.new(1, -19, 0.5, -8) or UDim2.new(0, 3, 0.5, -8),
+            BackgroundColor3 = state and COLORS.ToggleKnobOn or COLORS.ToggleKnobOff
+        }):Play()
+        if callback then callback(state) end
+    end)
+end
+
+local CloseRow = CreateOptionRow(1, ICONS.PowerOff, "Fechar Completamente", "Encerra o script e remove a interface.", true)
+local CloseActionBtn = Instance.new("TextButton")
+CloseActionBtn.Size = UDim2.new(0, 96, 0, 28)
+CloseActionBtn.Position = UDim2.new(1, -110, 0.5, -14)
+CloseActionBtn.BackgroundColor3 = COLORS.PanelBlack
+CloseActionBtn.BackgroundTransparency = 0.35
+CloseActionBtn.Text = "FECHAR"
+CloseActionBtn.TextColor3 = COLORS.White
+CloseActionBtn.Font = Enum.Font.GothamBold
+CloseActionBtn.TextSize = 11
+CloseActionBtn.ZIndex = 13
+CloseActionBtn.Parent = CloseRow
+Instance.new("UICorner", CloseActionBtn).CornerRadius = UDim.new(0, 6)
+local CloseStroke = Instance.new("UIStroke", CloseActionBtn)
+CloseStroke.Color = COLORS.White
+CloseStroke.Thickness = 1.2
+CloseStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+
+CloseActionBtn.MouseButton1Click:Connect(function()
+    running = false
+    if socket then pcall(function() socket:Close() end) end
+    ScreenGui:Destroy()
+end)
+
+local NotifRow = CreateOptionRow(2, ICONS.Bell, "NOTIFICATION", "Ative ou desative as notificações.", true)
+AddToggleControl(NotifRow, ChatSettings.Notifications, function(isEnabled)
+    ChatSettings.Notifications = isEnabled
+end)
+
+local CopyRow = CreateOptionRow(3, ICONS.CopyText, "COPY TEXT", "Permite copiar textos e mensagens.", true)
+AddToggleControl(CopyRow, ChatSettings.CopyText, function(isEnabled)
+    ChatSettings.CopyText = isEnabled
+end)
+
+local FreezeRow = CreateOptionRow(4, ICONS.Freeze, "FREEZE", "Trava o arraste da interface e do botão externo.", false)
+AddToggleControl(FreezeRow, ChatSettings.FreezeChat, function(isEnabled)
+    ChatSettings.FreezeChat = isEnabled
+end)
+
+local toggleBtnPressed = false
+
+ToggleButton.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        toggleBtnPressed = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+        if toggleBtnPressed then
+            toggleBtnPressed = false
+            local mousePos = input.Position
+            local btnPos = ToggleButton.AbsolutePosition
+            local btnSize = ToggleButton.AbsoluteSize
+            if mousePos.X >= btnPos.X and mousePos.X <= btnPos.X + btnSize.X and
+               mousePos.Y >= btnPos.Y and mousePos.Y <= btnPos.Y + btnSize.Y then
+                MainPanel.Visible = not MainPanel.Visible
+                -- Se o chat for aberto, esconde a notificação imediatamente
+                if MainPanel.Visible then
+                    HideNotification()
+                end
+            end
+        end
+    end
+end)
+
+ConfigButton.MouseButton1Click:Connect(function()
+    ConfigPanel.Visible = not ConfigPanel.Visible
+end)
+
+task.spawn(ConnectWS)
